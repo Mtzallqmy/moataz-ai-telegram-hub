@@ -1,5 +1,5 @@
 from pathlib import Path
-import secrets, traceback, uuid
+import logging, secrets, traceback, uuid
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
@@ -10,10 +10,11 @@ from starlette.middleware.sessions import SessionMiddleware
 from .ai import PROVIDER_PRESETS, chat, stream_chat, test_provider
 from .config import settings
 from .db import AuditLog, Provider, SessionLocal
-from .security import check_password, decrypt, encrypt, require_admin
+from .security import check_password, decrypt, encrypt, encryption_status, require_admin
 from .telegram import handle_update, tg
 
 app = FastAPI(title=settings.app_name, version="1.0.0", docs_url="/api/docs", redoc_url=None)
+logger = logging.getLogger("moataz_ai_hub")
 app.add_middleware(SessionMiddleware, secret_key=settings.session_secret, same_site="lax", https_only=settings.app_url.startswith("https"))
 BASE = Path(__file__).parent
 app.mount("/static", StaticFiles(directory=BASE / "static"), name="static")
@@ -28,13 +29,14 @@ def log(level, source, message):
 @app.exception_handler(Exception)
 async def unhandled_error(request: Request, exc: Exception):
     error_id = uuid.uuid4().hex[:10]
+    logger.exception("Unhandled request error id=%s method=%s path=%s", error_id, request.method, request.url.path, exc_info=exc)
     log("ERROR", "server", f"{error_id}: {type(exc).__name__}: {exc}\n{traceback.format_exc()}")
     if request.url.path.startswith("/api/") or request.url.path.startswith("/v1/"):
         return JSONResponse({"detail":"حدث خطأ داخلي","error_id":error_id}, status_code=500)
     return templates.TemplateResponse(request, "error.html", {"error_id":error_id,"app_name":settings.app_name}, status_code=500)
 
 @app.get("/health")
-def health(): return {"status":"ok","service":settings.app_name}
+def health(): return {"status":"ok","service":settings.app_name,"version":"1.2.1","encryption":"safe-derived"}
 
 @app.get("/api/diagnostics")
 def diagnostics(request: Request):
@@ -53,6 +55,7 @@ def diagnostics(request: Request):
         {"name":"رابط التطبيق","ok":settings.app_url.startswith("https://"),"detail":settings.app_url},
         {"name":"Telegram Token","ok":bool(settings.telegram_bot_token),"detail":"موجود" if settings.telegram_bot_token else "غير مضبوط"},
         {"name":"أمان الإدارة","ok":settings.admin_password not in {"change-me","change-this-now"},"detail":"مخصص" if settings.admin_password not in {"change-me","change-this-now"} else "غيّر كلمة المرور الافتراضية"},
+        {"name":"تشفير مفاتيح المزودات",**encryption_status()},
     ])
     return {"ok":all(x["ok"] for x in checks),"checks":checks}
 
