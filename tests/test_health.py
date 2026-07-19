@@ -2,6 +2,7 @@ from fastapi.testclient import TestClient
 from app.main import app
 from app.security import decrypt, encrypt
 from app.ai import _anthropic_payload, _chat_endpoint, _gemini_payload, _generation_options, _model_endpoints, _parse_models, normalize_base
+from app.db import normalize_database_url
 
 def test_health():
     response = TestClient(app).get("/health")
@@ -61,3 +62,9 @@ def test_native_payload_translation():
     gemini=_gemini_payload(messages,{"top_p":0.8,"max_tokens":50})
     assert gemini["systemInstruction"]["parts"][0]["text"] == "Be concise"
     assert gemini["generationConfig"]["maxOutputTokens"] == 50
+
+def test_empty_database_url_uses_valid_sqlite_fallback():
+    url,fallback=normalize_database_url("")
+    assert url == "sqlite:///./data.db" and fallback is True
+    postgres,fallback=normalize_database_url("postgresql://user:pass@db/app")
+    assert postgres.startswith("postgresql+psycopg://") and fallback is False
