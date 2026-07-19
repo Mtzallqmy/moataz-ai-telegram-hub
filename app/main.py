@@ -7,7 +7,7 @@ from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 from sqlalchemy import select
 from starlette.middleware.sessions import SessionMiddleware
-from .ai import PROVIDER_PRESETS, chat, stream_chat, test_provider
+from .ai import PROVIDER_PRESETS, chat, proxy_openai, stream_chat, test_provider
 from .config import settings
 from .db import AuditLog, Provider, SessionLocal
 from .security import check_password, decrypt, encrypt, encryption_status, require_admin
@@ -26,6 +26,11 @@ def log(level, source, message):
     except Exception:
         pass
 
+def require_api_key(request: Request):
+    expected=settings.api_access_key or settings.session_secret
+    supplied=request.headers.get("authorization","").removeprefix("Bearer ")
+    if not supplied or not secrets.compare_digest(supplied,expected): raise HTTPException(401,"Invalid API key")
+
 @app.exception_handler(Exception)
 async def unhandled_error(request: Request, exc: Exception):
     error_id = uuid.uuid4().hex[:10]
@@ -36,7 +41,7 @@ async def unhandled_error(request: Request, exc: Exception):
     return templates.TemplateResponse(request, "error.html", {"error_id":error_id,"app_name":settings.app_name}, status_code=500)
 
 @app.get("/health")
-def health(): return {"status":"ok","service":settings.app_name,"version":"1.2.1","encryption":"safe-derived"}
+def health(): return {"status":"ok","service":settings.app_name,"version":"1.3.0","encryption":"safe-derived","api":"openai-compatible"}
 
 @app.get("/api/diagnostics")
 def diagnostics(request: Request):
@@ -110,9 +115,9 @@ def delete_provider(provider_id: int, request: Request):
         db.delete(p); db.commit()
     return {"ok":True}
 
-class ProviderTest(BaseModel): base_url: str; api_key: str
+class ProviderTest(BaseModel): base_url: str; api_key: str; default_model: str = ""
 @app.post("/api/providers/test")
-async def provider_test(body: ProviderTest, request: Request): require_admin(request); return await test_provider(body.base_url, body.api_key)
+async def provider_test(body: ProviderTest, request: Request): require_admin(request); return await test_provider(body.base_url, body.api_key, body.default_model)
 
 class ProviderUpdate(BaseModel):
     name: str | None = None
@@ -141,7 +146,7 @@ async def test_saved_provider(provider_id: int, request: Request):
     with SessionLocal() as db:
         p = db.get(Provider, provider_id)
         if not p: raise HTTPException(404, "المزود غير موجود")
-        result = await test_provider(p.base_url, decrypt(p.api_key_encrypted))
+        result = await test_provider(p.base_url, decrypt(p.api_key_encrypted), p.default_model)
     log("INFO" if result["ok"] else "ERROR", "providers", f"فحص المزود #{provider_id}: {result['detail']}")
     return result
 
@@ -149,32 +154,55 @@ async def test_saved_provider(provider_id: int, request: Request):
 async def provider_models(provider_id: int, request: Request):
     return await test_saved_provider(provider_id, request)
 
-class ChatBody(BaseModel): message: str; provider: str|None=None; model: str|None=None
+class ChatBody(BaseModel): message: str = ""; messages: list[dict]|None=None; provider: str|None=None; model: str|None=None; temperature: float|None=None; max_tokens: int|None=None
 @app.post("/api/chat")
 async def web_chat(body: ChatBody, request: Request):
-    require_admin(request); data, provider=await chat([{"role":"user","content":body.message}],body.provider,body.model); return {"answer":data["choices"][0]["message"]["content"],"provider":provider,"usage":data.get("usage")}
+    require_admin(request); messages=body.messages or [{"role":"user","content":body.message}]; data, provider=await chat(messages,body.provider,body.model,options=body.model_dump()); return {"answer":data["choices"][0]["message"]["content"],"provider":provider,"usage":data.get("usage")}
+
+@app.post("/api/chat/stream")
+async def web_chat_stream(body: ChatBody, request: Request):
+    require_admin(request); messages=body.messages or [{"role":"user","content":body.message}]
+    return await stream_chat(messages,body.provider,body.model,body.model_dump())
 
 @app.post("/v1/chat/completions")
 async def compatible_chat(request: Request):
-    auth=request.headers.get("authorization","")
-    if auth != f"Bearer {settings.session_secret}": raise HTTPException(401,"Invalid API key")
+    require_api_key(request)
     body=await request.json()
     if body.get("stream") is True:
-        return await stream_chat(body.get("messages",[]),body.get("provider"),body.get("model"))
-    data,_=await chat(body.get("messages",[]),body.get("provider"),body.get("model")); return data
+        return await stream_chat(body.get("messages",[]),body.get("provider"),body.get("model"),body)
+    data,_=await chat(body.get("messages",[]),body.get("provider"),body.get("model"),options=body); return data
 
 @app.get("/v1/models")
 async def compatible_models(request: Request, provider: str | None = None):
-    if request.headers.get("authorization","") != f"Bearer {settings.session_secret}": raise HTTPException(401,"Invalid API key")
+    require_api_key(request)
     with SessionLocal() as db:
         q=select(Provider).where(Provider.enabled.is_(True))
         if provider: q=q.where(Provider.name==provider)
-        items=db.scalars(q).all()
-        output=[]
-        for p in items:
-            result=await test_provider(p.base_url,decrypt(p.api_key_encrypted))
-            output.extend({"id":m,"object":"model","owned_by":p.name} for m in result.get("models",[]))
+        items=[(p.name,p.base_url,decrypt(p.api_key_encrypted),p.default_model) for p in db.scalars(q).all()]
+    output=[]
+    for name,base_url,key,default_model in items:
+        result=await test_provider(base_url,key,default_model)
+        output.extend({"id":m,"object":"model","owned_by":name} for m in result.get("models",[]))
     return {"object":"list","data":output}
+
+@app.post("/v1/embeddings")
+async def compatible_embeddings(request: Request):
+    require_api_key(request); body=await request.json(); provider=body.pop("provider",None)
+    return await proxy_openai("embeddings",body,provider)
+
+@app.post("/v1/responses")
+async def compatible_responses(request: Request):
+    require_api_key(request); body=await request.json(); raw_input=body.get("input","")
+    if isinstance(raw_input,str): messages=[{"role":"user","content":raw_input}]
+    elif isinstance(raw_input,list):
+        messages=[]
+        for item in raw_input:
+            if isinstance(item,dict): messages.append({"role":item.get("role","user"),"content":item.get("content","")})
+    else: raise HTTPException(422,"input must be a string or message list")
+    if body.get("stream") is True: return await stream_chat(messages,body.get("provider"),body.get("model"),body)
+    data,provider=await chat(messages,body.get("provider"),body.get("model"),options=body)
+    text=data["choices"][0]["message"].get("content","")
+    return {"id":data.get("id",f"resp_{uuid.uuid4().hex}"),"object":"response","created_at":int(__import__("time").time()),"status":"completed","model":data.get("model",body.get("model")),"output":[{"type":"message","id":f"msg_{uuid.uuid4().hex[:16]}","status":"completed","role":"assistant","content":[{"type":"output_text","text":text,"annotations":[]}]}],"output_text":text,"usage":data.get("usage",{}),"provider":provider}
 
 @app.post("/api/files")
 async def upload_file(request: Request, file: UploadFile=File(...)):
