@@ -3,7 +3,14 @@ from sqlalchemy import Boolean, DateTime, Integer, String, Text, create_engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, sessionmaker
 from .config import settings
 
-url = settings.database_url.replace("postgres://", "postgresql+psycopg://", 1).replace("postgresql://", "postgresql+psycopg://", 1)
+def normalize_database_url(value: str | None) -> tuple[str, bool]:
+    raw=(value or "").strip()
+    fallback=not raw
+    if fallback: raw="sqlite:///./data.db"
+    raw=raw.replace("postgres://", "postgresql+psycopg://", 1).replace("postgresql://", "postgresql+psycopg://", 1)
+    return raw,fallback
+
+url, DATABASE_FALLBACK = normalize_database_url(settings.database_url)
 engine = create_engine(url, pool_pre_ping=True, connect_args={"check_same_thread": False} if url.startswith("sqlite") else {})
 SessionLocal = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
 
