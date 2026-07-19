@@ -1,6 +1,8 @@
 from fastapi.testclient import TestClient
 from app.main import app
-from app.security import decrypt, encrypt
+from app.security import decrypt, encrypt, validate_provider_target
+from fastapi import HTTPException
+import asyncio, re
 from app.ai import _anthropic_payload, _chat_endpoint, _gemini_payload, _generation_options, _model_endpoints, _parse_models, normalize_base
 from app.db import normalize_database_url
 
@@ -13,6 +15,8 @@ def test_login_page_renders():
     response = TestClient(app).get("/login")
     assert response.status_code == 200
     assert "تسجيل الدخول" in response.text
+    assert response.headers["x-frame-options"] == "DENY"
+    assert response.headers["x-content-type-options"] == "nosniff"
 
 def test_dashboard_redirects_without_session():
     response = TestClient(app).get("/", follow_redirects=False)
@@ -26,6 +30,14 @@ def test_dashboard_renders_production_controls_after_login():
     assert "دردشة متدفقة" in response.text
     assert "النماذج المكتشفة فعلياً" in response.text
     assert "معتز العلقمي" in response.text
+    assert "فحص فعلي: المفتاح والنماذج والتوليد" in response.text
+    assert 'name="csrf-token"' in response.text
+
+def test_state_change_rejects_missing_csrf():
+    client=TestClient(app)
+    client.post("/login",data={"username":"admin","password":"change-me"},follow_redirects=True)
+    response=client.delete("/api/providers/999999")
+    assert response.status_code == 403
 
 def test_presets_require_authentication():
     response = TestClient(app).get("/api/provider-presets")
@@ -68,3 +80,8 @@ def test_empty_database_url_uses_valid_sqlite_fallback():
     assert url == "sqlite:///./data.db" and fallback is True
     postgres,fallback=normalize_database_url("postgresql://user:pass@db/app")
     assert postgres.startswith("postgresql+psycopg://") and fallback is False
+
+def test_insecure_provider_url_is_blocked_by_default():
+    try: asyncio.run(validate_provider_target("http://127.0.0.1:8080/v1"))
+    except HTTPException as exc: assert exc.status_code == 422
+    else: raise AssertionError("insecure provider URL must be blocked")
