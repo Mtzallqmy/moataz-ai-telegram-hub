@@ -1,4 +1,5 @@
-import base64, hashlib, hmac
+import asyncio, base64, hashlib, hmac, ipaddress, socket
+from urllib.parse import urlsplit
 from cryptography.fernet import Fernet, InvalidToken
 from fastapi import HTTPException, Request
 from .config import settings
@@ -37,5 +38,29 @@ def encryption_status() -> dict:
 def require_admin(request: Request):
     if not request.session.get("admin"):
         raise HTTPException(401, "يلزم تسجيل الدخول")
+def ensure_csrf(request: Request) -> str:
+    token=request.session.get("csrf_token")
+    if not token:
+        token=__import__("secrets").token_urlsafe(32);request.session["csrf_token"]=token
+    return token
+def require_admin_write(request: Request):
+    require_admin(request)
+    expected=request.session.get("csrf_token",""); supplied=request.headers.get("x-csrf-token","")
+    if not expected or not supplied or not hmac.compare_digest(expected,supplied): raise HTTPException(403,"رمز حماية الطلب غير صالح؛ حدّث الصفحة وحاول مجدداً")
+def validate_form_csrf(request: Request, token: str):
+    require_admin(request); expected=request.session.get("csrf_token","")
+    if not expected or not token or not hmac.compare_digest(expected,token): raise HTTPException(403,"رمز حماية النموذج غير صالح")
 def check_password(value: str) -> bool:
     return hmac.compare_digest(value.encode(), settings.admin_password.encode())
+
+async def validate_provider_target(url: str):
+    parts=urlsplit(url.strip())
+    schemes={"https","http"} if settings.allow_insecure_provider_urls else {"https"}
+    if parts.scheme not in schemes: raise HTTPException(422,"Base URL يجب أن يستخدم HTTPS")
+    if not parts.hostname: raise HTTPException(422,"Base URL لا يحتوي اسم نطاق صالحاً")
+    if settings.allow_private_provider_urls: return
+    try: addresses=await asyncio.to_thread(socket.getaddrinfo,parts.hostname,parts.port or 443,type=socket.SOCK_STREAM)
+    except socket.gaierror as exc: raise HTTPException(422,f"تعذر حل نطاق المزود: {exc}")
+    for item in addresses:
+        ip=ipaddress.ip_address(item[4][0])
+        if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved or ip.is_multicast: raise HTTPException(422,"عناوين الشبكات الخاصة أو المحلية محظورة لحماية الخادم")
