@@ -9,7 +9,7 @@ from sqlalchemy import select
 from starlette.middleware.sessions import SessionMiddleware
 from .ai import PROVIDER_PRESETS, chat, proxy_openai, stream_chat, test_provider
 from .config import settings
-from .db import AuditLog, Provider, SessionLocal
+from .db import AuditLog, DATABASE_FALLBACK, Provider, SessionLocal
 from .security import check_password, decrypt, encrypt, encryption_status, require_admin
 from .telegram import handle_update, tg
 
@@ -41,7 +41,7 @@ async def unhandled_error(request: Request, exc: Exception):
     return templates.TemplateResponse(request, "error.html", {"error_id":error_id,"app_name":settings.app_name}, status_code=500)
 
 @app.get("/health")
-def health(): return {"status":"ok","service":settings.app_name,"version":"1.3.0","encryption":"safe-derived","api":"openai-compatible"}
+def health(): return {"status":"ok","service":settings.app_name,"version":"1.3.1","encryption":"safe-derived","api":"openai-compatible","database":"sqlite-fallback" if DATABASE_FALLBACK else "configured"}
 
 @app.get("/api/diagnostics")
 def diagnostics(request: Request):
@@ -57,6 +57,7 @@ def diagnostics(request: Request):
         checks.append({"name":"مساحة الملفات","ok":True,"detail":str(root.resolve())})
     except Exception as exc: checks.append({"name":"مساحة الملفات","ok":False,"detail":str(exc)[:300]})
     checks.extend([
+        {"name":"إعداد قاعدة البيانات","ok":True,"detail":"SQLite احتياطية لأن DATABASE_URL فارغ" if DATABASE_FALLBACK else "DATABASE_URL مضبوط"},
         {"name":"رابط التطبيق","ok":settings.app_url.startswith("https://"),"detail":settings.app_url},
         {"name":"Telegram Token","ok":bool(settings.telegram_bot_token),"detail":"موجود" if settings.telegram_bot_token else "غير مضبوط"},
         {"name":"أمان الإدارة","ok":settings.admin_password not in {"change-me","change-this-now"},"detail":"مخصص" if settings.admin_password not in {"change-me","change-this-now"} else "غيّر كلمة المرور الافتراضية"},
