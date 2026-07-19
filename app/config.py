@@ -15,6 +15,10 @@ class Settings(BaseSettings):
     allowed_telegram_users: str = ""
     workspace_dir: str = "./workspace_files"
     max_upload_mb: int = 10
+    allow_private_provider_urls: bool = False
+    allow_insecure_provider_urls: bool = False
+    api_rate_limit_per_minute: int = 120
+    login_rate_limit_per_minute: int = 10
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
     @property
