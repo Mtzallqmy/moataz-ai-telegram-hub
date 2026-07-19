@@ -5,7 +5,7 @@ from fastapi import HTTPException
 from fastapi.responses import StreamingResponse
 from sqlalchemy import select
 from .db import Provider, SessionLocal
-from .security import decrypt
+from .security import decrypt, validate_provider_target
 
 PROVIDER_PRESETS = {
     "openai": {"name": "OpenAI", "base_url": "https://api.openai.com", "model": "gpt-4o-mini"},
@@ -136,7 +136,7 @@ async def _probe_inference(base_url: str, api_key: str, model: str) -> dict:
     if not model: return {"attempted":False,"ok":False,"detail":"لم يحدد نموذج لاختبار التوليد"}
     raw = base_url.rstrip("/")
     try:
-        async with httpx.AsyncClient(timeout=30, follow_redirects=True) as client:
+        async with httpx.AsyncClient(timeout=30, follow_redirects=False) as client:
             if "anthropic.com" in raw:
                 r=await client.post(f"{raw}/v1/messages",headers={"x-api-key":api_key,"anthropic-version":"2023-06-01","content-type":"application/json"},json={"model":model,"max_tokens":1,"messages":[{"role":"user","content":"Reply OK"}]})
             elif "generativelanguage.googleapis.com" in raw:
@@ -152,6 +152,7 @@ async def chat(messages: list[dict], provider_name: str | None = None, model: st
         if not provider: raise HTTPException(503, "لا يوجد مزود مفعّل")
         key, raw_base, chosen = decrypt(provider.api_key_encrypted), provider.base_url.rstrip("/"), model or provider.default_model
     if not chosen: raise HTTPException(422, "حدد النموذج الافتراضي للمزود")
+    await validate_provider_target(raw_base)
     try:
         async with httpx.AsyncClient(timeout=90) as client:
             if "anthropic.com" in raw_base:
@@ -185,8 +186,9 @@ async def test_provider(base_url: str, api_key: str, default_model: str = ""):
     started = __import__("time").perf_counter()
     try:
         raw_base = base_url.rstrip("/")
+        await validate_provider_target(raw_base)
         attempted=[]; r=None; best_response=None
-        async with httpx.AsyncClient(timeout=20, follow_redirects=True) as client:
+        async with httpx.AsyncClient(timeout=20, follow_redirects=False) as client:
             if "anthropic.com" in raw_base:
                 endpoint=f"{raw_base}/v1/models"; attempted.append(endpoint)
                 r = await client.get(endpoint, headers={"x-api-key":api_key,"anthropic-version":"2023-06-01"})
@@ -233,6 +235,7 @@ async def stream_chat(messages: list[dict], provider_name: str | None = None, mo
         provider = _select_provider(db,provider_name,model)
         if not provider: raise HTTPException(503, "لا يوجد مزود مفعّل")
         key, base, chosen = decrypt(provider.api_key_encrypted), provider.base_url.rstrip("/"), model or provider.default_model
+    await validate_provider_target(base)
     def chunk(text="",finish=None,chunk_id="stream"):
         return "data: "+json.dumps({"id":chunk_id,"object":"chat.completion.chunk","model":chosen,"choices":[{"index":0,"delta":{"content":text} if text else {},"finish_reason":finish}]},ensure_ascii=False)+"\n\n"
     if "anthropic.com" in base:
@@ -282,6 +285,7 @@ async def proxy_openai(endpoint: str, body: dict, provider_name: str | None = No
         provider=_select_provider(db,provider_name,body.get("model"))
         if not provider: raise HTTPException(503,"لا يوجد مزود مفعّل")
         key,base=decrypt(provider.api_key_encrypted),provider.base_url.rstrip("/")
+    await validate_provider_target(base)
     if "anthropic.com" in base or "generativelanguage.googleapis.com" in base: raise HTTPException(422,f"{endpoint} غير مدعوم أصلياً بواسطة هذا المزود")
     async with httpx.AsyncClient(timeout=90) as client:
         response=await client.post(_endpoint_from_chat(base,endpoint),headers=_auth_headers(base,key),json=body)
