@@ -7,6 +7,7 @@ class Settings(BaseSettings):
     admin_username: str = "admin"
     admin_password: str = "change-me"
     session_secret: str = "dev-session-secret-change-me"
+    api_access_key: str = ""
     encryption_key: str = ""
     database_url: str = "sqlite:///./data.db"
     telegram_bot_token: str = ""
@@ -22,4 +23,3 @@ class Settings(BaseSettings):
 
 settings = Settings()
 Path(settings.workspace_dir).mkdir(parents=True, exist_ok=True)
-
