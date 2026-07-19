@@ -9,6 +9,9 @@
 - دعم أي مزود يقدم OpenAI-compatible `/v1/chat/completions` و`/v1/models`.
 - محولات أصلية حقيقية لـ Anthropic Messages API وGoogle Gemini generateContent.
 - بث SSE فعلي عبر `stream: true` ونقطة موحدة لجلب النماذج `/v1/models`.
+- محرك OpenAI-compatible عام يقبل Base URL أو رابط `/v1` أو `/models` أو `/chat/completions` كاملاً دون مضاعفة المسار.
+- تمرير معاملات التوليد والأدوات وصيغ الاستجابة، مع ترحيل SSE مباشرة من المزود.
+- نقاط `/v1/responses` و`/v1/embeddings` إضافة إلى Chat Completions وModels.
 - إعدادات جاهزة لـ OpenAI وOpenRouter وGroq وTogether وDeepSeek وMistral وCerebras وxAI وAnthropic وGemini.
 - فحص اتصال وزمن استجابة وجلب نماذج وتعديل وتفعيل/تعطيل كل مزود من اللوحة.
 - بوت Telegram خاص مع قائمة سماح اختيارية وأزرار وأوامر.
@@ -68,6 +71,8 @@ curl https://YOUR-DOMAIN/v1/chat/completions \
 curl https://YOUR-DOMAIN/v1/models \
   -H "Authorization: Bearer YOUR_SESSION_SECRET"
 ```
+
+يفضل إنشاء `API_ACCESS_KEY` مستقل في Railway لنقاط `/v1`. إذا لم يُضبط، يستخدم التطبيق `SESSION_SECRET` للتوافق مع النسخ السابقة.
 
 ## التشخيص
 
