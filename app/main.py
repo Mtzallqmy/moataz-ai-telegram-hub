@@ -1,5 +1,6 @@
 from pathlib import Path
-import logging, secrets, traceback, uuid
+from collections import defaultdict, deque
+import logging, secrets, time, traceback, uuid
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
@@ -10,7 +11,7 @@ from starlette.middleware.sessions import SessionMiddleware
 from .ai import PROVIDER_PRESETS, chat, proxy_openai, stream_chat, test_provider
 from .config import settings
 from .db import AuditLog, DATABASE_FALLBACK, Provider, SessionLocal
-from .security import check_password, decrypt, encrypt, encryption_status, require_admin
+from .security import check_password, decrypt, encrypt, encryption_status, ensure_csrf, require_admin, require_admin_write, validate_form_csrf, validate_provider_target
 from .telegram import handle_update, tg
 
 app = FastAPI(title=settings.app_name, version="1.0.0", docs_url="/api/docs", redoc_url=None)
@@ -19,6 +20,22 @@ app.add_middleware(SessionMiddleware, secret_key=settings.session_secret, same_s
 BASE = Path(__file__).parent
 app.mount("/static", StaticFiles(directory=BASE / "static"), name="static")
 templates = Jinja2Templates(directory=BASE / "templates")
+rate_buckets: dict[str, deque] = defaultdict(deque)
+
+@app.middleware("http")
+async def production_guard(request: Request, call_next):
+    request_id=request.headers.get("x-request-id") or uuid.uuid4().hex[:16]
+    path=request.url.path; now=time.monotonic(); ip=request.headers.get("x-forwarded-for",request.client.host if request.client else "unknown").split(",")[0].strip()
+    limit=settings.login_rate_limit_per_minute if path=="/login" and request.method=="POST" else settings.api_rate_limit_per_minute if path.startswith(("/api/","/v1/")) else 0
+    if limit:
+        bucket=rate_buckets[f"{ip}:{path}"]
+        while bucket and bucket[0] < now-60: bucket.popleft()
+        if len(bucket)>=limit: return JSONResponse({"detail":"تم تجاوز حد الطلبات؛ حاول بعد دقيقة","request_id":request_id},status_code=429,headers={"Retry-After":"60"})
+        bucket.append(now)
+    response=await call_next(request)
+    response.headers.update({"X-Request-ID":request_id,"X-Content-Type-Options":"nosniff","X-Frame-Options":"DENY","Referrer-Policy":"strict-origin-when-cross-origin","Permissions-Policy":"camera=(), geolocation=(), payment=()","Content-Security-Policy":"default-src 'self'; connect-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'"})
+    if settings.app_url.startswith("https://"): response.headers["Strict-Transport-Security"]="max-age=31536000; includeSubDomains"
+    return response
 
 def log(level, source, message):
     try:
@@ -41,7 +58,7 @@ async def unhandled_error(request: Request, exc: Exception):
     return templates.TemplateResponse(request, "error.html", {"error_id":error_id,"app_name":settings.app_name}, status_code=500)
 
 @app.get("/health")
-def health(): return {"status":"ok","service":settings.app_name,"version":"1.3.1","encryption":"safe-derived","api":"openai-compatible","database":"sqlite-fallback" if DATABASE_FALLBACK else "configured"}
+def health(): return {"status":"ok","service":settings.app_name,"version":"1.4.0","encryption":"safe-derived","api":"openai-compatible","security":"hardened","database":"sqlite-fallback" if DATABASE_FALLBACK else "configured"}
 
 @app.get("/api/diagnostics")
 def diagnostics(request: Request):
@@ -62,6 +79,9 @@ def diagnostics(request: Request):
         {"name":"Telegram Token","ok":bool(settings.telegram_bot_token),"detail":"موجود" if settings.telegram_bot_token else "غير مضبوط"},
         {"name":"أمان الإدارة","ok":settings.admin_password not in {"change-me","change-this-now"},"detail":"مخصص" if settings.admin_password not in {"change-me","change-this-now"} else "غيّر كلمة المرور الافتراضية"},
         {"name":"تشفير مفاتيح المزودات",**encryption_status()},
+        {"name":"مفتاح API مستقل","ok":bool(settings.api_access_key),"detail":"API_ACCESS_KEY مضبوط" if settings.api_access_key else "يعمل عبر SESSION_SECRET؛ يوصى بمفتاح مستقل"},
+        {"name":"حماية اتصالات المزودات","ok":not settings.allow_private_provider_urls,"detail":"حظر الشبكات الداخلية وSSRF مفعّل" if not settings.allow_private_provider_urls else "السماح بالشبكات الخاصة مفعّل يدوياً"},
+        {"name":"حد الطلبات","ok":True,"detail":f"{settings.api_rate_limit_per_minute} طلب API في الدقيقة"},
     ])
     return {"ok":all(x["ok"] for x in checks),"checks":checks}
 
@@ -75,7 +95,7 @@ def dashboard(request: Request):
     except Exception as exc:
         providers, logs = [], []
         log("ERROR", "database", str(exc))
-    return templates.TemplateResponse(request, "dashboard.html", {"providers":providers,"logs":logs,"presets":PROVIDER_PRESETS,"app_name":settings.app_name,"app_url":settings.app_url})
+    return templates.TemplateResponse(request, "dashboard.html", {"providers":providers,"logs":logs,"presets":PROVIDER_PRESETS,"csrf_token":ensure_csrf(request),"app_name":settings.app_name,"app_url":settings.app_url})
 
 @app.get("/login", response_class=HTMLResponse)
 def login_page(request: Request): return templates.TemplateResponse(request, "login.html", {"error":None,"app_name":settings.app_name})
@@ -87,7 +107,7 @@ def login(request: Request, username: str=Form(...), password: str=Form(...)):
     return templates.TemplateResponse(request, "login.html", {"error":"بيانات الدخول غير صحيحة","app_name":settings.app_name}, status_code=401)
 
 @app.post("/logout")
-def logout(request: Request): request.session.clear(); return RedirectResponse("/login", 303)
+def logout(request: Request, csrf_token: str=Form(...)): validate_form_csrf(request,csrf_token); request.session.clear(); return RedirectResponse("/login", 303)
 
 @app.get("/api/providers")
 def providers(request: Request):
@@ -98,8 +118,9 @@ def providers(request: Request):
 def provider_presets(request: Request): require_admin(request); return PROVIDER_PRESETS
 
 @app.post("/api/providers")
-def save_provider(request: Request, name: str=Form(...), base_url: str=Form(...), api_key: str=Form(...), default_model: str=Form("")):
-    require_admin(request)
+async def save_provider(request: Request, name: str=Form(...), base_url: str=Form(...), api_key: str=Form(...), default_model: str=Form(""), csrf_token: str=Form(...)):
+    validate_form_csrf(request,csrf_token)
+    await validate_provider_target(base_url)
     with SessionLocal() as db:
         p = db.scalar(select(Provider).where(Provider.name==name))
         if p: p.base_url=base_url; p.default_model=default_model; p.api_key_encrypted=encrypt(api_key) if api_key else p.api_key_encrypted
@@ -109,7 +130,7 @@ def save_provider(request: Request, name: str=Form(...), base_url: str=Form(...)
 
 @app.delete("/api/providers/{provider_id}")
 def delete_provider(provider_id: int, request: Request):
-    require_admin(request)
+    require_admin_write(request)
     with SessionLocal() as db:
         p=db.get(Provider,provider_id)
         if not p: raise HTTPException(404,"المزود غير موجود")
@@ -118,7 +139,7 @@ def delete_provider(provider_id: int, request: Request):
 
 class ProviderTest(BaseModel): base_url: str; api_key: str; default_model: str = ""
 @app.post("/api/providers/test")
-async def provider_test(body: ProviderTest, request: Request): require_admin(request); return await test_provider(body.base_url, body.api_key, body.default_model)
+async def provider_test(body: ProviderTest, request: Request): require_admin_write(request); return await test_provider(body.base_url, body.api_key, body.default_model)
 
 class ProviderUpdate(BaseModel):
     name: str | None = None
@@ -128,8 +149,9 @@ class ProviderUpdate(BaseModel):
     enabled: bool | None = None
 
 @app.patch("/api/providers/{provider_id}")
-def update_provider(provider_id: int, body: ProviderUpdate, request: Request):
-    require_admin(request)
+async def update_provider(provider_id: int, body: ProviderUpdate, request: Request):
+    require_admin_write(request)
+    if body.base_url: await validate_provider_target(body.base_url)
     with SessionLocal() as db:
         p = db.get(Provider, provider_id)
         if not p: raise HTTPException(404, "المزود غير موجود")
@@ -143,26 +165,32 @@ def update_provider(provider_id: int, body: ProviderUpdate, request: Request):
 
 @app.post("/api/providers/{provider_id}/test")
 async def test_saved_provider(provider_id: int, request: Request):
-    require_admin(request)
+    require_admin_write(request)
     with SessionLocal() as db:
         p = db.get(Provider, provider_id)
         if not p: raise HTTPException(404, "المزود غير موجود")
-        result = await test_provider(p.base_url, decrypt(p.api_key_encrypted), p.default_model)
+        values=(p.base_url,decrypt(p.api_key_encrypted),p.default_model)
+    result = await test_provider(*values)
     log("INFO" if result["ok"] else "ERROR", "providers", f"فحص المزود #{provider_id}: {result['detail']}")
     return result
 
 @app.get("/api/providers/{provider_id}/models")
 async def provider_models(provider_id: int, request: Request):
-    return await test_saved_provider(provider_id, request)
+    require_admin(request)
+    with SessionLocal() as db:
+        p=db.get(Provider,provider_id)
+        if not p: raise HTTPException(404,"المزود غير موجود")
+        values=(p.base_url,decrypt(p.api_key_encrypted),p.default_model)
+    return await test_provider(*values)
 
 class ChatBody(BaseModel): message: str = ""; messages: list[dict]|None=None; provider: str|None=None; model: str|None=None; temperature: float|None=None; max_tokens: int|None=None
 @app.post("/api/chat")
 async def web_chat(body: ChatBody, request: Request):
-    require_admin(request); messages=body.messages or [{"role":"user","content":body.message}]; data, provider=await chat(messages,body.provider,body.model,options=body.model_dump()); return {"answer":data["choices"][0]["message"]["content"],"provider":provider,"usage":data.get("usage")}
+    require_admin_write(request); messages=body.messages or [{"role":"user","content":body.message}]; data, provider=await chat(messages,body.provider,body.model,options=body.model_dump()); return {"answer":data["choices"][0]["message"]["content"],"provider":provider,"usage":data.get("usage")}
 
 @app.post("/api/chat/stream")
 async def web_chat_stream(body: ChatBody, request: Request):
-    require_admin(request); messages=body.messages or [{"role":"user","content":body.message}]
+    require_admin_write(request); messages=body.messages or [{"role":"user","content":body.message}]
     return await stream_chat(messages,body.provider,body.model,body.model_dump())
 
 @app.post("/v1/chat/completions")
@@ -207,7 +235,7 @@ async def compatible_responses(request: Request):
 
 @app.post("/api/files")
 async def upload_file(request: Request, file: UploadFile=File(...)):
-    require_admin(request); content=await file.read(settings.max_upload_mb*1024*1024+1)
+    require_admin_write(request); content=await file.read(settings.max_upload_mb*1024*1024+1)
     if len(content)>settings.max_upload_mb*1024*1024: raise HTTPException(413,"الملف أكبر من الحد المسموح")
     safe=Path(file.filename or "file").name
     target=(Path(settings.workspace_dir)/safe).resolve(); root=Path(settings.workspace_dir).resolve()
@@ -227,7 +255,7 @@ async def telegram_webhook(request: Request):
 
 @app.post("/api/telegram/setup")
 async def setup_telegram(request: Request):
-    require_admin(request); url=f"{settings.app_url.rstrip('/')}/telegram/webhook"
+    require_admin_write(request); url=f"{settings.app_url.rstrip('/')}/telegram/webhook"
     result=await tg("setWebhook",{"url":url,"secret_token":settings.telegram_webhook_secret,"allowed_updates":["message","callback_query"]})
     await tg("setMyCommands",{"commands":[{"command":"start","description":"بدء البوت"},{"command":"help","description":"المساعدة"}]})
     log("INFO","telegram",str(result)); return result
