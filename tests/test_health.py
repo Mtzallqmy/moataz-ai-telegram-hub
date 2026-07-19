@@ -1,5 +1,6 @@
 from fastapi.testclient import TestClient
 from app.main import app
+from app.security import decrypt, encrypt
 
 def test_health():
     response = TestClient(app).get("/health")
@@ -19,3 +20,8 @@ def test_dashboard_redirects_without_session():
 def test_presets_require_authentication():
     response = TestClient(app).get("/api/provider-presets")
     assert response.status_code == 401
+
+def test_provider_secrets_round_trip():
+    encrypted = encrypt("sk-example")
+    assert encrypted != "sk-example"
+    assert decrypt(encrypted) == "sk-example"
