@@ -39,6 +39,7 @@ uvicorn app.main:app --reload
 
 1. أنشئ مشروعاً جديداً من مستودع GitHub.
 2. أضف خدمة PostgreSQL؛ سيُضاف `DATABASE_URL` عادة تلقائياً.
+   إذا كان `DATABASE_URL` فارغاً يبدأ التطبيق تلقائياً بقاعدة SQLite بدلاً من انهيار الحاوية، لكن PostgreSQL هو الخيار الدائم الموصى به للإنتاج.
 3. أضف متغيرات `.env.example`. اجعل `APP_URL` نطاق Railway العام دون `/` أخيرة.
 4. أنشئ `SESSION_SECRET` و`TELEGRAM_WEBHOOK_SECRET` كسلاسل عشوائية طويلة، و`ENCRYPTION_KEY` بالأمر أعلاه.
 5. ضع `TELEGRAM_BOT_TOKEN` من BotFather، ومعرفات المستخدمين في `ALLOWED_TELEGRAM_USERS` مفصولة بفاصلة.
