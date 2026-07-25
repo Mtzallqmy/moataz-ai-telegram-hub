@@ -8,7 +8,8 @@ npm-debug.log*
 .env.*
 !.env.example
 .wrangler
-.openai
+.openai/*
+!.openai/hosting.json
 coverage
 *.md
 !README.md
