@@ -1,0 +1,48 @@
+name: Replace repository with Moataz AI platform
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/replace-with-moatazai261.yml
+
+permissions:
+  contents: write
+
+concurrency:
+  group: replace-repository
+  cancel-in-progress: false
+
+jobs:
+  replace:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out target repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download latest project from source main
+        run: |
+          git clone --depth 1 --branch main \
+            https://github.com/Mtzallqmy/moatazai261.git \
+            /tmp/moatazai261
+
+      - name: Replace all repository contents
+        run: |
+          rsync -a --delete --exclude='.git/' /tmp/moatazai261/ ./
+          grep -RIl "Mtzallqmy/moatazai261" . --exclude-dir=.git \
+            | xargs -r sed -i 's#Mtzallqmy/moatazai261#Mtzallqmy/moataz-ai-telegram-hub#g'
+
+      - name: Commit replacement to main
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          if git diff --cached --quiet; then
+            echo "No changes to commit."
+            exit 0
+          fi
+          git commit -m "Replace Telegram hub with Moataz AI platform"
+          git push origin HEAD:main
