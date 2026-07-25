@@ -1,6 +1,17 @@
 import { z } from "zod";
 
-const flag = z.enum(["true", "false"]).default("false").transform((value) => value === "true");
+function emptyToUndefined(value: unknown) {
+  return typeof value === "string" && value.trim() === "" ? undefined : value;
+}
+
+const flag = z.preprocess(
+  emptyToUndefined,
+  z
+    .enum(["true", "false"])
+    .default("false")
+    .transform((value) => value === "true"),
+);
+
 const schema = z.object({
   AI_CHAT_ENABLED: flag,
   FILE_UPLOADS_ENABLED: flag,
@@ -16,4 +27,5 @@ export const featureFlags = schema.parse({
   TELEGRAM_INTEGRATION_ENABLED: process.env.TELEGRAM_INTEGRATION_ENABLED,
   SCHEDULED_PUBLISHING_ENABLED: process.env.SCHEDULED_PUBLISHING_ENABLED,
 });
+
 export type FeatureFlag = keyof typeof featureFlags;
