@@ -37,3 +37,17 @@ jobs:
           name: test-report
           path: test-report.txt
           retention-days: 1
+
+  container:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build production Docker image
+        run: |
+          docker build \
+            --build-arg NEXT_PUBLIC_SITE_URL=https://moatazalalqami.online \
+            --build-arg NEXT_PUBLIC_SUPABASE_URL=https://example.supabase.co \
+            --build-arg NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=sb_publishable_ci_placeholder_1234567890 \
+            --build-arg NEXT_PUBLIC_PASSWORD_AUTH_ENABLED=false \
+            -t moatazai26-ci .
