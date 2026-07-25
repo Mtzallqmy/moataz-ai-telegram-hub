@@ -43,11 +43,35 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
-      - name: Build production Docker image
+      - name: Build production Docker image without platform variables
+        id: docker-build
         run: |
-          docker build \
-            --build-arg NEXT_PUBLIC_SITE_URL=https://moatazalalqami.online \
-            --build-arg NEXT_PUBLIC_SUPABASE_URL=https://example.supabase.co \
-            --build-arg NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=sb_publishable_ci_placeholder_1234567890 \
-            --build-arg NEXT_PUBLIC_PASSWORD_AUTH_ENABLED=false \
-            -t moatazai26-ci .
+          set -o pipefail
+          docker build -t moatazai26-ci . 2>&1 | tee docker-build.log
+      - name: Upload Docker build diagnostics
+        if: failure() && steps.docker-build.outcome == 'failure'
+        uses: actions/upload-artifact@v4
+        with:
+          name: docker-build-report
+          path: docker-build.log
+          retention-days: 1
+      - name: Start image and verify health endpoint
+        run: |
+          set -euo pipefail
+          container_id="$(docker run --detach --publish 3000:3000 moatazai26-ci)"
+          cleanup() {
+            docker logs "${container_id}" || true
+            docker rm --force "${container_id}" >/dev/null 2>&1 || true
+          }
+          trap cleanup EXIT
+
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent --show-error http://127.0.0.1:3000/api/health >/tmp/health.json; then
+              cat /tmp/health.json
+              exit 0
+            fi
+            sleep 2
+          done
+
+          echo "Container did not become healthy in time." >&2
+          exit 1
