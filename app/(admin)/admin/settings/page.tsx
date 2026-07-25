@@ -1,0 +1,1 @@
+import { AdminSection } from "@/components/admin-section"; export default function Page(){return <AdminSection title="إعدادات المنصة" description="الإعدادات المركزية ستُخزن مع سجل تدقيق لكل تغيير."/>;}

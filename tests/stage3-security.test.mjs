@@ -1,0 +1,11 @@
+import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
+import test from "node:test";
+const migration=await readFile(new URL("../supabase/migrations/20260722145452_stage3_ai_chat_files.sql",import.meta.url),"utf8");
+const providerRoute=await readFile(new URL("../app/api/v1/admin/providers/route.ts",import.meta.url),"utf8");
+const fileRoute=await readFile(new URL("../app/api/v1/files/route.ts",import.meta.url),"utf8");
+test("stage-three tables enable RLS",()=>{for(const table of ["conversations","messages","chat_runs","provider_usage_records","files","file_chunks","ai_provider_credentials"])assert.match(migration,new RegExp(`alter table public\\.${table} enable row level security`));});
+test("assistant messages and usage records have no client write policy",()=>{assert.doesNotMatch(migration,/create policy .*messages.* for insert to authenticated/);assert.doesNotMatch(migration,/create policy .*provider_usage_records.* for insert to authenticated/);});
+test("provider API never selects encrypted secrets",()=>{assert.doesNotMatch(providerRoute,/select\([^)]*encrypted_secret/);assert.match(providerRoute,/key_hint/);});
+test("upload flow validates signature and stores UUID path",()=>{assert.match(fileRoute,/validateMagic/);assert.match(fileRoute,/crypto\.randomUUID/);assert.match(fileRoute,/chat-attachments/);});
+test("private storage buckets are not public",()=>{assert.match(migration,/chat-attachments','chat-attachments',false/);assert.match(migration,/user-files','user-files',false/);});

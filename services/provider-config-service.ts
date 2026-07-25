@@ -1,0 +1,7 @@
+import "server-only";
+import { createAdminClient } from "@/lib/supabase/admin";
+import { resolveProviderCredential } from "./credential-resolver";
+import type { ProviderConfiguration } from "@/providers/types";
+type ProviderRow={id:string;name:string;provider_type:string;base_url:string|null;enabled:boolean;chat_endpoint?:string;models_endpoint?:string;api_version?:string|null;timeout_ms?:number;retry_count?:number;configuration?:unknown};
+export async function loadProviderConfiguration(row:ProviderRow):Promise<ProviderConfiguration>{if(!row.base_url)throw new Error("Provider base URL is missing");const cfg=(row.configuration??{}) as Record<string,unknown>;return{id:row.id,type:row.provider_type,name:row.name,baseUrl:row.base_url,enabled:row.enabled,chatEndpoint:row.chat_endpoint,modelsEndpoint:row.models_endpoint,apiVersion:row.api_version??undefined,timeoutMs:row.timeout_ms,retryCount:row.retry_count,headers:typeof cfg.headers==="object"&&cfg.headers?cfg.headers as Record<string,string>:undefined,credential:await resolveProviderCredential(row.id)};}
+export async function recordProviderHealth(providerId:string,health:{ok:boolean;latencyMs:number;errorCode?:string}){await createAdminClient().from("ai_providers").update({health_status:health.ok?"healthy":"unavailable",last_health_check_at:new Date().toISOString(),last_latency_ms:health.latencyMs,last_error_code:health.errorCode??null,...(health.ok?{last_success_at:new Date().toISOString()}: {})}).eq("id",providerId);}

@@ -1,0 +1,1 @@
+import { FeatureState } from "@/components/feature-state";export default function Page(){return <FeatureState title="إعداد الحساب" description="يمكن إكمال الاسم واسم المستخدم واللغة والمظهر بعد تطبيق Migration وربط Supabase."/>;}

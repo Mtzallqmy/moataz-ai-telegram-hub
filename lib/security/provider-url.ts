@@ -1,0 +1,4 @@
+import "server-only";
+import { serverEnv } from "@/config/env.server";
+const privateV4=[/^127\./,/^10\./,/^169\.254\./,/^192\.168\./,/^172\.(1[6-9]|2\d|3[01])\./,/^0\./];
+export function assertSafeProviderUrl(value:string){const url=new URL(value);if(url.protocol!=="https:" && !(serverEnv.ALLOW_PRIVATE_PROVIDER_URLS&&url.protocol==="http:"))throw new Error("Provider endpoint must use HTTPS");const host=url.hostname.toLowerCase().replace(/^\[|\]$/g,"");if(!serverEnv.ALLOW_PRIVATE_PROVIDER_URLS&&(host==="localhost"||host.endsWith(".local")||host==="::1"||host.startsWith("fc")||host.startsWith("fd")||privateV4.some(v=>v.test(host))))throw new Error("Private provider endpoints are blocked");if(url.username||url.password)throw new Error("Credentials are not allowed in provider URLs");return url.toString();}

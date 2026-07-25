@@ -1,104 +1,33 @@
-# Moataz AI Telegram Hub
+# Moataz AI 26
 
-منصة مستقلة تجمع لوحة ويب عربية، بوت Telegram يعمل بـ Webhook، مزودات ذكاء اصطناعي متعددة، وواجهة API متوافقة مع OpenAI.
+Production-oriented foundation for an Arabic/English multi-provider AI and content platform. The first two phases establish the application architecture, provider abstraction, Supabase authentication, PostgreSQL schema, RBAC permissions, RLS policies, storage rules, and protected route groups.
 
-## الوظائف
+## Local setup
 
-- لوحة إدارة محمية بجلسة دخول وواجهة RTL متجاوبة.
-- حفظ مفاتيح المزودات مشفّرة بـ Fernet.
-- دعم أي مزود يقدم OpenAI-compatible `/v1/chat/completions` و`/v1/models`.
-- محولات أصلية حقيقية لـ Anthropic Messages API وGoogle Gemini generateContent.
-- بث SSE فعلي عبر `stream: true` ونقطة موحدة لجلب النماذج `/v1/models`.
-- محرك OpenAI-compatible عام يقبل Base URL أو رابط `/v1` أو `/models` أو `/chat/completions` كاملاً دون مضاعفة المسار.
-- تمرير معاملات التوليد والأدوات وصيغ الاستجابة، مع ترحيل SSE مباشرة من المزود.
-- نقاط `/v1/responses` و`/v1/embeddings` إضافة إلى Chat Completions وModels.
-- إعدادات جاهزة لـ OpenAI وOpenRouter وGroq وTogether وDeepSeek وMistral وCerebras وxAI وAnthropic وGemini.
-- فحص اتصال وزمن استجابة وجلب نماذج وتعديل وتفعيل/تعطيل كل مزود من اللوحة.
-- بوت Telegram خاص مع قائمة سماح اختيارية وأزرار وأوامر.
-- endpoint موحد: `POST /v1/chat/completions`.
-- رفع وتنزيل ملفات ضمن مجلد معزول، وتنظيف أسماء الملفات وحد للحجم.
-- سجلات تشخيص، فحص صحة، ووثائق API على `/api/docs`.
-- PostgreSQL على Railway وSQLite للتطوير المحلي.
+1. Use Node.js 22 or newer and run `npm ci`.
+2. Copy `.env.example` to `.env.local` and set the public Supabase URL and publishable key.
+3. Apply migrations from `supabase/migrations` through the Supabase CLI or migration connector.
+4. Configure OAuth redirect URLs as described in `docs/`.
+5. Run `npm run dev`.
 
-## التشغيل محلياً
+The service-role key, encryption keys, OAuth secrets, and provider keys are server-only. Never prefix them with `NEXT_PUBLIC_`.
 
-```bash
-python -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-cp .env.example .env
-python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
-uvicorn app.main:app --reload
-```
+## Railway deployment
 
-ضع نتيجة الأمر السابق في `ENCRYPTION_KEY`، وغيّر كلمات المرور والأسرار قبل التشغيل.
+Railway uses `npm run build:railway` and `npm run start:railway`; the existing
+Sites build remains unchanged. Connect the `main` branch, add the variables
+listed in `docs/railway-deployment.md`, and point the health check to
+`/api/v1/status`. Railway supplies `PORT` automatically.
 
-إذا وُضعت عبارة عادية بدلاً من مفتاح Fernet، يشتق التطبيق منها مفتاحاً صالحاً وآمناً تلقائياً ولا يتعطل حفظ المزودات. يجب إبقاء `ENCRYPTION_KEY` ثابتاً بعد حفظ المفاتيح.
+## Quality gates
 
-## النشر على Railway
+`npm run lint`, `npm run typecheck`, `npm test`, and `npm run build` are required. GitHub Actions runs the same gates on pushes and pull requests.
 
-1. أنشئ مشروعاً جديداً من مستودع GitHub.
-2. أضف خدمة PostgreSQL؛ سيُضاف `DATABASE_URL` عادة تلقائياً.
-   إذا كان `DATABASE_URL` فارغاً يبدأ التطبيق تلقائياً بقاعدة SQLite بدلاً من انهيار الحاوية، لكن PostgreSQL هو الخيار الدائم الموصى به للإنتاج.
-3. أضف متغيرات `.env.example`. اجعل `APP_URL` نطاق Railway العام دون `/` أخيرة.
-4. أنشئ `SESSION_SECRET` و`TELEGRAM_WEBHOOK_SECRET` كسلاسل عشوائية طويلة، و`ENCRYPTION_KEY` بالأمر أعلاه.
-5. ضع `TELEGRAM_BOT_TOKEN` من BotFather، ومعرفات المستخدمين في `ALLOWED_TELEGRAM_USERS` مفصولة بفاصلة.
-6. بعد النشر افتح اللوحة واضغط «تفعيل Webhook» مرة واحدة.
+## Feature status
 
-Railway يكتشف `Dockerfile` و`railway.json` تلقائياً ويتحقق من `/health`.
+Unfinished capabilities are disabled through explicit feature flags. The application never presents a placeholder operation as successful. Full chat, article editing, Telegram integration, and scheduled publishing intentionally remain outside these phases.
+## Stage 3
 
-## أمثلة Base URL
+Stage 3 adds real provider protocol adapters, encrypted multi-key credentials, connection/model discovery APIs, persisted SSE chat, conversation APIs, private file uploads, inline text extraction/chunking, usage accounting and an RLS/Storage migration. See `docs/ai-provider-architecture.md`, `docs/chat-architecture.md`, and `docs/provider-security.md`.
 
-- OpenAI: `https://api.openai.com`
-- OpenRouter: `https://openrouter.ai/api`
-- Groq: `https://api.groq.com/openai`
-
-تُضاف `/v1` تلقائياً إذا لم تكن موجودة. أدخل اسم النموذج كما يعيده المزود تماماً.
-
-Anthropic وGemini لا يتم التعامل معهما كواجهات شكلية؛ يحوّل الخادم رسائل OpenAI الموحدة إلى البروتوكول الأصلي لكل مزود ثم يعيد الاستجابة بصيغة OpenAI-compatible.
-
-## استخدام API الموحد
-
-```bash
-curl https://YOUR-DOMAIN/v1/chat/completions \
-  -H "Authorization: Bearer YOUR_SESSION_SECRET" \
-  -H "Content-Type: application/json" \
-  -d '{"model":"MODEL_NAME","messages":[{"role":"user","content":"مرحبا"}]}'
-```
-
-للبث المتدفق أضف `"stream":true`. ولجلب قائمة النماذج:
-
-```bash
-curl https://YOUR-DOMAIN/v1/models \
-  -H "Authorization: Bearer YOUR_SESSION_SECRET"
-```
-
-يفضل إنشاء `API_ACCESS_KEY` مستقل في Railway لنقاط `/v1`. إذا لم يُضبط، يستخدم التطبيق `SESSION_SECRET` للتوافق مع النسخ السابقة.
-
-## التشخيص
-
-من لوحة التحكم استخدم «فحص النظام» لاختبار قاعدة البيانات ومساحة الملفات والرابط وإعدادات Telegram والأمان. الأخطاء غير المتوقعة تعرض رقم تتبع بدلاً من صفحة بيضاء، ويُحفظ التفصيل في سجل الأحداث.
-
-## الأمان
-
-- لا ترفع `.env` إلى GitHub.
-- غيّر كلمة مرور المشرف وكل القيم الافتراضية قبل أول نشر.
-- اضبط `ALLOWED_TELEGRAM_USERS` حتى لا يصبح البوت عاماً.
-- استخدم PostgreSQL وRailway Volume لـ`WORKSPACE_DIR` للاحتفاظ بالملفات.
-- تحرير الملفات النصية عن بعد غير مفعّل افتراضياً لتجنب منفذ تنفيذ عشوائي؛ الرفع والتنزيل محصوران في مساحة العمل.
-- جميع عمليات لوحة الإدارة المغيّرة محمية بـCSRF، والجلسات تستخدم SameSite وSecure على HTTPS.
-- توجد حدود للطلبات ومحاولات الدخول وترويسات HSTS وCSP ومنع تضمين الموقع داخل إطارات.
-- اتصالات المزودات تحظر HTTP والشبكات الداخلية افتراضياً لمقاومة SSRF؛ يمكن تمكينها صراحة بمتغيرات البيئة عند الحاجة إلى مزود داخلي موثوق.
-
-## البنية
-
-```text
-app/
-  main.py       HTTP, dashboard, API and files
-  telegram.py   webhook and Telegram UX
-  ai.py         provider adapter
-  db.py         persistence models
-  security.py   sessions and encryption
-  templates/    web UI
-  static/       styles and interactions
-```
+The live Supabase project must be active and both migrations must be applied before enabling `AI_CHAT_ENABLED` or `FILE_UPLOADS_ENABLED`. Heavy document/media processing, embeddings/RAG retrieval and Amazon Bedrock SigV4 are explicit extension points and are not represented as operational.

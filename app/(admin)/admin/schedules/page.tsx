@@ -1,0 +1,1 @@
+import { AdminSection } from "@/components/admin-section"; export default function Page(){return <AdminSection title="النشر المجدول" description="خدمة الجدولة غير مفعلة في هذه المرحلة." flag="SCHEDULED_PUBLISHING_ENABLED = false"/>;}

@@ -1,0 +1,142 @@
+{
+  "$schema": "https://api.northflank.com/v1/schemas/template-schema.json",
+  "apiVersion": "v1.2",
+  "name": "Moataz AI 26 production",
+  "description": "Creates the Northflank project, managed PostgreSQL addon, and Docker-based web service from the main branch.",
+  "arguments": {
+    "NEXT_PUBLIC_SITE_URL": "https://moatazalalqami.online",
+    "NEXT_PUBLIC_SUPABASE_URL": "",
+    "NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY": "",
+    "SUPABASE_SECRET_KEY": "",
+    "PROVIDER_ENCRYPTION_KEY": "",
+    "PLATFORM_OWNER_EMAILS": "",
+    "ALLOWED_ORIGINS": "https://moatazalalqami.online,https://www.moatazalalqami.online"
+  },
+  "options": {
+    "autorun": true,
+    "concurrencyPolicy": "queue"
+  },
+  "spec": {
+    "kind": "Workflow",
+    "spec": {
+      "type": "sequential",
+      "steps": [
+        {
+          "kind": "Project",
+          "ref": "project",
+          "spec": {
+            "name": "Moataz AI 26",
+            "description": "Production AI platform",
+            "region": "europe-west",
+            "networking": {
+              "allowedIngressProjects": []
+            }
+          }
+        },
+        {
+          "kind": "Workflow",
+          "spec": {
+            "type": "sequential",
+            "context": {
+              "projectId": "${refs.project.id}"
+            },
+            "steps": [
+              {
+                "kind": "Addon",
+                "ref": "database",
+                "spec": {
+                  "externalAccessEnabled": false,
+                  "type": "postgresql",
+                  "billing": {
+                    "replicas": 1,
+                    "storage": 6144,
+                    "storageClass": "nvme",
+                    "deploymentPlan": "nf-compute-50"
+                  },
+                  "tlsEnabled": true,
+                  "name": "moatazai-postgres",
+                  "version": "17"
+                }
+              },
+              {
+                "kind": "CombinedService",
+                "ref": "web",
+                "spec": {
+                  "name": "moatazai-web",
+                  "vcsData": {
+                    "projectType": "github",
+                    "projectUrl": "https://github.com/Mtzallqmy/moataz-ai-telegram-hub",
+                    "projectBranch": "main"
+                  },
+                  "buildSettings": {
+                    "dockerfile": {
+                      "buildEngine": "kaniko",
+                      "useCache": true,
+                      "dockerWorkDir": "/",
+                      "dockerFilePath": "/Dockerfile",
+                      "buildkit": {
+                        "useInternalCache": true,
+                        "internalCacheStorage": 16384
+                      }
+                    }
+                  },
+                  "deployment": {
+                    "instances": 1,
+                    "storage": {
+                      "ephemeralStorage": {
+                        "storageSize": 1024
+                      },
+                      "shmSize": 64
+                    },
+                    "docker": {
+                      "configType": "default"
+                    }
+                  },
+                  "billing": {
+                    "deploymentPlan": "nf-compute-50",
+                    "buildPlan": "nf-compute-400-16"
+                  },
+                  "runtimeEnvironment": {
+                    "NODE_ENV": "production",
+                    "PORT": "3000",
+                    "NEXT_PUBLIC_SITE_URL": "${args.NEXT_PUBLIC_SITE_URL}",
+                    "NEXT_PUBLIC_SUPABASE_URL": "${args.NEXT_PUBLIC_SUPABASE_URL}",
+                    "NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY": "${args.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY}",
+                    "SUPABASE_SECRET_KEY": "${args.SUPABASE_SECRET_KEY}",
+                    "PROVIDER_ENCRYPTION_KEY": "${args.PROVIDER_ENCRYPTION_KEY}",
+                    "PLATFORM_OWNER_EMAILS": "${args.PLATFORM_OWNER_EMAILS}",
+                    "ALLOWED_ORIGINS": "${args.ALLOWED_ORIGINS}",
+                    "ALLOW_PRIVATE_PROVIDER_URLS": "false",
+                    "AI_CHAT_ENABLED": "true",
+                    "FILE_UPLOADS_ENABLED": "true",
+                    "CONTENT_EDITOR_ENABLED": "true",
+                    "PASSWORD_AUTH_ENABLED": "false",
+                    "NEXT_PUBLIC_PASSWORD_AUTH_ENABLED": "false",
+                    "MAX_UPLOAD_BYTES": "104857600"
+                  },
+                  "runtimeFiles": {},
+                  "buildArguments": {},
+                  "buildFiles": {},
+                  "ports": [
+                    {
+                      "internalPort": 3000,
+                      "protocol": "HTTP",
+                      "name": "http",
+                      "public": true,
+                      "domains": [],
+                      "security": {
+                        "policies": [],
+                        "credentials": []
+                      },
+                      "disableNfDomain": false
+                    }
+                  ]
+                }
+              }
+            ]
+          }
+        }
+      ]
+    }
+  }
+}

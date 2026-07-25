@@ -1,0 +1,1 @@
+import { AdminSection } from "@/components/admin-section"; export default function Page(){return <AdminSection title="التكاملات" description="Telegram وواجهات الربط الخارجية متوقفة حتى إضافة الأسرار على الخادم." flag="TELEGRAM_INTEGRATION_ENABLED = false"/>;}

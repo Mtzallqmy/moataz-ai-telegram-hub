@@ -1,0 +1,4 @@
+export const ErrorCode = { VALIDATION_ERROR:"VALIDATION_ERROR", UNAUTHENTICATED:"UNAUTHENTICATED", FORBIDDEN:"FORBIDDEN", NOT_FOUND:"NOT_FOUND", RATE_LIMITED:"RATE_LIMITED", FEATURE_DISABLED:"FEATURE_DISABLED", PROVIDER_FAILED:"PROVIDER_FAILED", INTERNAL_ERROR:"INTERNAL_ERROR" } as const;
+export type ErrorCode = typeof ErrorCode[keyof typeof ErrorCode];
+export class AppError extends Error { constructor(public readonly code:ErrorCode, message:string, public readonly status=500, public readonly details?:Record<string,unknown>){super(message);this.name="AppError";} }
+export function errorResponse(cause:unknown, requestId=crypto.randomUUID()) { const error=cause instanceof AppError?cause:new AppError(ErrorCode.INTERNAL_ERROR,"تعذر إكمال الطلب.",500); return Response.json({error:{code:error.code,message:error.message,requestId}},{status:error.status,headers:{"Cache-Control":"no-store","X-Request-ID":requestId}}); }

@@ -1,0 +1,1 @@
+export function AdminSection({title,description,flag}:{title:string;description:string;flag?:string}){return <section className="admin-card disabled"><strong>0</strong><h2>{title}</h2><p>{description}</p><span className="status-badge">{flag??"بانتظار ربط البيانات"}</span></section>;}

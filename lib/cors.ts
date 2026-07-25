@@ -1,0 +1,2 @@
+import { supportedOrigins } from "@/config/security";
+export function corsHeaders(request:Request){ const origin=request.headers.get("origin"); const headers=new Headers({"Vary":"Origin","Access-Control-Allow-Methods":"GET,POST,PATCH,DELETE,OPTIONS","Access-Control-Allow-Headers":"Authorization,Content-Type,X-Request-ID"}); if(origin&&supportedOrigins.includes(origin)) headers.set("Access-Control-Allow-Origin",origin); return headers; }
