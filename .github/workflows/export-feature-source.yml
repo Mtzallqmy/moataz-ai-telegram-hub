@@ -1,6 +1,9 @@
 name: Export feature source
 
 on:
+  pull_request:
+    branches:
+      - main
   push:
     branches:
       - feature/agentic-rag-mcp-integration
