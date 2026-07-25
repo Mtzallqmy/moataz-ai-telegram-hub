@@ -44,7 +44,17 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Build production Docker image without platform variables
-        run: docker build -t moatazai26-ci .
+        id: docker-build
+        run: |
+          set -o pipefail
+          docker build -t moatazai26-ci . 2>&1 | tee docker-build.log
+      - name: Upload Docker build diagnostics
+        if: failure() && steps.docker-build.outcome == 'failure'
+        uses: actions/upload-artifact@v4
+        with:
+          name: docker-build-report
+          path: docker-build.log
+          retention-days: 1
       - name: Start image and verify health endpoint
         run: |
           set -euo pipefail
