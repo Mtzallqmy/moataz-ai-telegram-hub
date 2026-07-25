@@ -1,0 +1,30 @@
+name: Export feature source
+
+on:
+  pull_request:
+    branches:
+      - main
+  push:
+    branches:
+      - feature/agentic-rag-mcp-integration
+
+permissions:
+  contents: read
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+      - name: Package repository
+        run: |
+          mkdir -p /tmp/export
+          rsync -a --exclude='.git/' ./ /tmp/export/
+      - uses: actions/upload-artifact@v4
+        with:
+          name: feature-source
+          path: /tmp/export
+          include-hidden-files: true
+          retention-days: 1
