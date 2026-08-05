@@ -82,6 +82,10 @@ begin
   set consumed_at = now()
   where id = v_code.id;
 
+  delete from public.telegram_links
+  where telegram_user_id = p_telegram_user_id
+    and user_id <> v_code.user_id;
+
   insert into public.telegram_links (
     user_id,
     telegram_user_id,
@@ -112,10 +116,6 @@ begin
     linked_at = now(),
     last_seen_at = now(),
     is_active = true;
-
-  delete from public.telegram_links
-  where telegram_user_id = p_telegram_user_id
-    and user_id <> v_code.user_id;
 
   return v_code.user_id;
 end;
